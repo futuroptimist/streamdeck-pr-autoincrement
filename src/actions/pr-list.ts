@@ -1,8 +1,9 @@
 import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/streamdeck";
-import { exec, spawn } from "child_process";
+import { exec, execFile, spawn } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Regex to match a GitHub PR URL ending with /pull/<number> with optional trailing slash/whitespace.
@@ -16,9 +17,12 @@ const PR_URL_REGEX = /\/pull\/(\d+)\s*\/?\s*$/;
  */
 async function readClipboard(): Promise<string> {
 	const isMac = process.platform === "darwin";
-	const command = isMac ? "pbpaste" : "powershell.exe -Command Get-Clipboard -Raw";
+	if (isMac) {
+		const { stdout } = await execAsync("pbpaste");
+		return stdout;
+	}
 
-	const { stdout } = await execAsync(command);
+	const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", "Get-Clipboard -Raw"]);
 	return stdout;
 }
 
@@ -36,7 +40,11 @@ async function writeClipboard(text: string): Promise<void> {
 			proc = spawn("pbcopy", [], { shell: false });
 		} else {
 			// On Windows, use PowerShell with stdin input
-			proc = spawn("powershell.exe", ["-Command", "$input | Set-Clipboard"], { shell: false });
+			proc = spawn(
+				"powershell.exe",
+				["-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
+				{ shell: false }
+			);
 		}
 
 		proc.on("error", reject);
