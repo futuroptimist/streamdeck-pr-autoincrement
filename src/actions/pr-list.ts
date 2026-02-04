@@ -1,15 +1,11 @@
 import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/streamdeck";
-import { exec, execFile, spawn } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
+import { spawn } from "child_process";
 
 /**
  * Regex to match a GitHub PR URL ending with /pull/<number> with optional trailing slash/whitespace.
  * Captures the PR number.
  */
-const PR_URL_REGEX = /\/pull\/(\d+)\s*\/?\s*$/;
+const PR_URL_REGEX = /\/pull\/(\d+)\/?\s*$/;
 
 /**
  * Reads text from the system clipboard.
@@ -17,13 +13,25 @@ const PR_URL_REGEX = /\/pull\/(\d+)\s*\/?\s*$/;
  */
 async function readClipboard(): Promise<string> {
 	const isMac = process.platform === "darwin";
-	if (isMac) {
-		const { stdout } = await execAsync("pbpaste");
-		return stdout;
-	}
+	return new Promise((resolve, reject) => {
+		const proc = isMac
+			? spawn("pbpaste", [], { shell: false })
+			: spawn("powershell.exe", ["-NoProfile", "-Command", "Get-Clipboard -Raw"], { shell: false });
+		let output = "";
 
-	const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", "Get-Clipboard -Raw"]);
-	return stdout;
+		proc.stdout.on("data", (chunk: Buffer | string) => {
+			output += chunk.toString();
+		});
+
+		proc.on("error", reject);
+		proc.on("close", (code) => {
+			if (code === 0) {
+				resolve(output);
+			} else {
+				reject(new Error(`Clipboard read failed with exit code ${code}`));
+			}
+		});
+	});
 }
 
 /**
@@ -56,8 +64,19 @@ async function writeClipboard(text: string): Promise<void> {
 			}
 		});
 
-		proc.stdin.write(text);
-		proc.stdin.end();
+		if (!proc.stdin) {
+			reject(new Error("stdin not available"));
+			return;
+		}
+
+		proc.stdin.on("error", reject);
+
+		try {
+			proc.stdin.write(text);
+			proc.stdin.end();
+		} catch (error) {
+			reject(error);
+		}
 	});
 }
 
@@ -77,13 +96,18 @@ export class PRListAction extends SingletonAction {
 			const match = trimmedContent.match(PR_URL_REGEX);
 
 			if (!match) {
-				streamDeck.logger.error(`Clipboard content does not match PR URL pattern: ${trimmedContent}`);
+				streamDeck.logger.error("Clipboard content does not match expected PR URL pattern");
 				await ev.action.showAlert();
 				return;
 			}
 
 			// Extract the PR number
-			const prNumber = parseInt(match[1], 10);
+			const prNumber = Number.parseInt(match[1], 10);
+			if (Number.isNaN(prNumber) || prNumber < 0 || !Number.isInteger(prNumber)) {
+				streamDeck.logger.error("Invalid PR number parsed from clipboard content");
+				await ev.action.showAlert();
+				return;
+			}
 
 			// Build the URL prefix by removing the trailing number (and optional slash/space)
 			const prefix = trimmedContent.replace(PR_URL_REGEX, "/pull/");

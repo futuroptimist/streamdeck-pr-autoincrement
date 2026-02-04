@@ -18,7 +18,7 @@
   "author": "futuroptimist",
   "license": "MIT",
   "dependencies": {
-    "@elgato/streamdeck": "^1.2.1"
+    "@elgato/streamdeck": "^1.4.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
