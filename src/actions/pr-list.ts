@@ -1,5 +1,5 @@
 import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/streamdeck";
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
@@ -23,20 +23,34 @@ async function readClipboard(): Promise<string> {
 }
 
 /**
- * Writes text to the system clipboard.
+ * Writes text to the system clipboard safely without shell interpolation.
  * Uses pbcopy on macOS, PowerShell Set-Clipboard on Windows.
+ * Data is passed via stdin to avoid command injection.
  */
 async function writeClipboard(text: string): Promise<void> {
 	const isMac = process.platform === "darwin";
 
-	if (isMac) {
-		await execAsync(`echo -n ${JSON.stringify(text)} | pbcopy`);
-	} else {
-		// For Windows, use PowerShell Set-Clipboard
-		// Escape the text properly for PowerShell
-		const escapedText = text.replace(/'/g, "''");
-		await execAsync(`powershell.exe -Command "Set-Clipboard -Value '${escapedText}'"`);
-	}
+	return new Promise((resolve, reject) => {
+		let proc;
+		if (isMac) {
+			proc = spawn("pbcopy", [], { shell: false });
+		} else {
+			// On Windows, use PowerShell with stdin input
+			proc = spawn("powershell.exe", ["-Command", "$input | Set-Clipboard"], { shell: false });
+		}
+
+		proc.on("error", reject);
+		proc.on("close", (code) => {
+			if (code === 0) {
+				resolve();
+			} else {
+				reject(new Error(`Clipboard write failed with exit code ${code}`));
+			}
+		});
+
+		proc.stdin.write(text);
+		proc.stdin.end();
+	});
 }
 
 /**
