@@ -7,7 +7,10 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "pretest": "rm -rf test-dist && tsc --project tsconfig.test.json && printf '{\"type\":\"commonjs\"}\\n' > test-dist/package.json",
+    "test": "node --test",
+    "test:ci": "npm test"
   },
   "keywords": [
     "streamdeck",

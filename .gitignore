@@ -3,6 +3,7 @@ node_modules/
 
 # Build output (keep manifest.json and imgs)
 com.futuroptimist.prlist.sdPlugin/bin/
+test-dist/
 
 # IDE
 .vscode/
