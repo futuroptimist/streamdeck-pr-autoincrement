@@ -115,29 +115,22 @@ jobs:
           set -euo pipefail
           streamdeck validate com.futuroptimist.prlist.sdPlugin
 
-      - name: Package plugin
+      - name: Validate and pack plugin
+        id: pack
         run: |
           set -euo pipefail
           streamdeck pack com.futuroptimist.prlist.sdPlugin
+          PACKAGE_PATH="$(find . -maxdepth 2 -name '*.streamDeckPlugin' -print -quit)"
+          if [ -z "$PACKAGE_PATH" ]; then
+            echo "Error: No .streamDeckPlugin package found after packing." >&2
+            exit 1
+          fi
+          echo "package_path=${PACKAGE_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Verify package artifact
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          plugin_files=(com.futuroptimist.prlist.sdPlugin/bin/*.streamDeckPlugin)
-          shopt -u nullglob
-          if [ "${#plugin_files[@]}" -eq 0 ]; then
-            echo "Error: No .streamDeckPlugin files were produced in com.futuroptimist.prlist.sdPlugin/bin/" >&2
-            ls -al com.futuroptimist.prlist.sdPlugin || true
-            ls -al com.futuroptimist.prlist.sdPlugin/bin || true
-            exit 1
-          fi
-          for pkg in "${plugin_files[@]}"; do
-            if [ ! -s "$pkg" ]; then
-              echo "Error: Packaged plugin file '$pkg' is empty." >&2
-              exit 1
-            fi
-          done
+          test -s "${{ steps.pack.outputs.package_path }}"
 
       - name: Commit and tag
         if: github.event_name == 'workflow_dispatch'
@@ -173,4 +166,4 @@ jobs:
           name: "${{ steps.version.outputs.tag }}"
           body: |
             Generates a 4-line list of incrementing GitHub PR URLs from your clipboard.
-          files: com.futuroptimist.prlist.sdPlugin/bin/*.streamDeckPlugin
+          files: "${{ steps.pack.outputs.package_path }}"
