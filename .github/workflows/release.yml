@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           streamdeck pack com.futuroptimist.prlist.sdPlugin
-          PACKAGE_PATH="$(find . -maxdepth 2 -name '*.streamDeckPlugin' -print -quit)"
+          PACKAGE_PATH="$(find . -maxdepth 2 -name 'com.futuroptimist.prlist.streamDeckPlugin' -print -quit)"
           if [ -z "$PACKAGE_PATH" ]; then
             echo "Error: No .streamDeckPlugin package found after packing." >&2
             exit 1
