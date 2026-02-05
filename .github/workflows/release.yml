@@ -87,15 +87,16 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           CURRENT="$(node -p "require('./package.json').version")"
+          MANIFEST_VERSION="$(node -p "require('./com.futuroptimist.prlist.sdPlugin/manifest.json').Version")"
           if [ "$CURRENT" = "$VERSION" ]; then
-            node scripts/update-manifest-version.mjs \
-              com.futuroptimist.prlist.sdPlugin/manifest.json \
-              "${VERSION}"
+            if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+              node scripts/update-manifest-version.mjs "${VERSION}"
+            fi
           else
             npm version "${VERSION}" --no-git-tag-version
-            node scripts/update-manifest-version.mjs \
-              com.futuroptimist.prlist.sdPlugin/manifest.json \
-              "${VERSION}"
+            if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+              node scripts/update-manifest-version.mjs "${VERSION}"
+            fi
           fi
 
       - name: Build
@@ -163,6 +164,9 @@ jobs:
             committed=true
           else
             committed=false
+          fi
+          if git rev-parse -q --verify "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null; then
+            git tag -d "v${{ steps.version.outputs.version }}"
           fi
           git tag "v${{ steps.version.outputs.version }}"
           if [ "$committed" = true ]; then
