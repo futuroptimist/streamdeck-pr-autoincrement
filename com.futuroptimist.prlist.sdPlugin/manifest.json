@@ -11,7 +11,9 @@
       ],
       "Tooltip": "Read a GitHub PR URL from clipboard and output 4 incrementing PR URLs",
       "UUID": "com.futuroptimist.prlist.fromclipboard",
-      "Controllers": ["Keypad"]
+      "Controllers": [
+        "Keypad"
+      ]
     }
   ],
   "Author": "futuroptimist",
