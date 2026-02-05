@@ -120,11 +120,16 @@ jobs:
         run: |
           set -euo pipefail
           streamdeck pack com.futuroptimist.prlist.sdPlugin
-          PACKAGE_PATH="$(find . -maxdepth 2 -name 'com.futuroptimist.prlist.streamDeckPlugin' -print -quit)"
-          if [ -z "$PACKAGE_PATH" ]; then
-            echo "Error: No .streamDeckPlugin package found after packing." >&2
+          mapfile -t packages < <(find . -maxdepth 2 -name 'com.futuroptimist.prlist.streamDeckPlugin' -print)
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "Error: No com.futuroptimist.prlist.streamDeckPlugin package found after packing." >&2
             exit 1
           fi
+          if [ "${#packages[@]}" -gt 1 ]; then
+            printf "Error: Multiple packages found:\n%s\n" "${packages[@]}" >&2
+            exit 1
+          fi
+          PACKAGE_PATH="${packages[0]}"
           echo "package_path=${PACKAGE_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Verify package artifact
