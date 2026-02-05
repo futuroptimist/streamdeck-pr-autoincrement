@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import * as ts from "typescript";
+
+const require = createRequire(import.meta.url);
+const ts = require("typescript");
 
 export async function load(url, context, defaultLoad) {
 	if (url.endsWith(".ts")) {
