@@ -87,16 +87,11 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           CURRENT="$(node -p "require('./package.json').version")"
-          MANIFEST_VERSION="$(node -p "require('./com.futuroptimist.prlist.sdPlugin/manifest.json').Version")"
           if [ "$CURRENT" = "$VERSION" ]; then
-            if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
-              node scripts/update-manifest-version.mjs "${VERSION}"
-            fi
+            node scripts/update-manifest-version.mjs "${VERSION}"
           else
             npm version "${VERSION}" --no-git-tag-version
-            if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
-              node scripts/update-manifest-version.mjs "${VERSION}"
-            fi
+            node scripts/update-manifest-version.mjs "${VERSION}"
           fi
 
       - name: Build
@@ -154,25 +149,22 @@ jobs:
             exit 1
           fi
           echo "Resolved branch: ${BRANCH}"
-          echo "Release version: ${{ steps.version.outputs.version }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Release version: ${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json \
             com.futuroptimist.prlist.sdPlugin/manifest.json
+          COMMIT_CREATED=false
           if ! git diff --cached --quiet; then
-            git commit -m "chore(release): v${{ steps.version.outputs.version }}"
-            committed=true
-          else
-            committed=false
+            git commit -m "chore(release): v${VERSION}"
+            COMMIT_CREATED=true
           fi
-          if git rev-parse -q --verify "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null; then
-            git tag -d "v${{ steps.version.outputs.version }}"
-          fi
-          git tag "v${{ steps.version.outputs.version }}"
-          if [ "$committed" = true ]; then
+          git tag "v${VERSION}"
+          if [ "$COMMIT_CREATED" = true ]; then
             git push origin "HEAD:${BRANCH}"
           fi
-          git push origin "v${{ steps.version.outputs.version }}"
+          git push origin "v${VERSION}"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
