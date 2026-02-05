@@ -16,7 +16,7 @@ export function buildPrListFromUrl(url: string, count = 4): string {
 	}
 
 	const prNumber = Number.parseInt(match[1], 10);
-	if (Number.isNaN(prNumber) || prNumber < 0 || !Number.isInteger(prNumber)) {
+	if (Number.isNaN(prNumber) || prNumber < 0) {
 		throw new Error("Invalid PR number");
 	}
 
