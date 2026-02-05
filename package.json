@@ -6,6 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "pretest": "npm run build",
+    "test": "node --test",
+    "test:ci": "npm test",
     "watch": "tsc --watch",
     "lint": "eslint src --ext .ts"
   },
