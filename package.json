@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test": "node --test --loader ./test/ts-loader.mjs test/*.test.ts",
+    "test:ci": "npm test",
     "watch": "tsc --watch",
     "lint": "eslint src --ext .ts"
   },

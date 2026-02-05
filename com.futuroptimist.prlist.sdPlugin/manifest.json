@@ -1,11 +1,11 @@
 {
   "Actions": [
     {
-      "Icon": "imgs/action",
+      "Icon": "imgs/action.png",
       "Name": "PR List from Clipboard",
       "States": [
         {
-          "Image": "imgs/action",
+          "Image": "imgs/action.png",
           "TitleAlignment": "middle"
         }
       ],
@@ -15,16 +15,12 @@
     }
   ],
   "Author": "futuroptimist",
-  "Category": "GitHub Tools",
-  "CategoryIcon": "imgs/plugin",
+  "Category": "PR Auto-Increment",
+  "CategoryIcon": "imgs/plugin.png",
   "CodePath": "bin/plugin.js",
   "Description": "Stream Deck plugin that reads a GitHub PR URL from clipboard and outputs 4 incrementing PR URLs as a bullet list",
-  "Icon": "imgs/plugin",
+  "Icon": "imgs/plugin.png",
   "Name": "PR Auto-Increment",
-  "Nodejs": {
-    "Version": "20",
-    "Debug": "enabled"
-  },
   "OS": [
     {
       "Platform": "mac",
@@ -40,5 +36,5 @@
     "MinimumVersion": "6.4"
   },
   "UUID": "com.futuroptimist.prlist",
-  "Version": "1.0.0"
+  "Version": "1.0.0.0"
 }
