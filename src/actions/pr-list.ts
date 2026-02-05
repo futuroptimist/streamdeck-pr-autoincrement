@@ -2,10 +2,31 @@ import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/
 import { spawn } from "child_process";
 
 /**
- * Regex to match a GitHub PR URL ending with /pull/<number> with optional trailing slash/whitespace.
+ * Regex to match a GitHub PR URL ending with /pull/<number> with optional
+ * trailing slash/whitespace.
  * Captures the PR number.
  */
-const PR_URL_REGEX = /\/pull\/(\d+)\/?\s*$/;
+const PR_URL_REGEX = /\/pull\/(\d+)\s*\/?\s*$/;
+
+export function buildPrListFromUrl(url: string, count = 4): string {
+	const trimmedUrl = url.trim();
+	const match = trimmedUrl.match(PR_URL_REGEX);
+
+	if (!match) {
+		throw new Error("Clipboard content does not match expected PR URL pattern");
+	}
+
+	const prNumber = Number.parseInt(match[1], 10);
+	if (Number.isNaN(prNumber) || prNumber < 0 || !Number.isInteger(prNumber)) {
+		throw new Error("Invalid PR number parsed from clipboard content");
+	}
+
+	const prefix = trimmedUrl.replace(PR_URL_REGEX, "/pull/");
+
+	return Array.from({ length: count }, (_, index) => `- ${prefix}${prNumber + index}`).join(
+		"\n"
+	);
+}
 
 /**
  * Reads text from the system clipboard.
@@ -90,36 +111,7 @@ export class PRListAction extends SingletonAction {
 		try {
 			// Read clipboard content
 			const clipboardContent = await readClipboard();
-			const trimmedContent = clipboardContent.trim();
-
-			// Check if it matches a PR URL pattern
-			const match = trimmedContent.match(PR_URL_REGEX);
-
-			if (!match) {
-				streamDeck.logger.error("Clipboard content does not match expected PR URL pattern");
-				await ev.action.showAlert();
-				return;
-			}
-
-			// Extract the PR number
-			const prNumber = Number.parseInt(match[1], 10);
-			if (Number.isNaN(prNumber) || prNumber < 0 || !Number.isInteger(prNumber)) {
-				streamDeck.logger.error("Invalid PR number parsed from clipboard content");
-				await ev.action.showAlert();
-				return;
-			}
-
-			// Build the URL prefix by removing the trailing number (and optional slash/space)
-			const prefix = trimmedContent.replace(PR_URL_REGEX, "/pull/");
-
-			// Generate 4 incrementing PR URLs
-			const urls: string[] = [];
-			for (let i = 0; i < 4; i++) {
-				urls.push(`- ${prefix}${prNumber + i}`);
-			}
-
-			// Join with newlines
-			const output = urls.join("\n");
+			const output = buildPrListFromUrl(clipboardContent);
 
 			// Write to clipboard
 			await writeClipboard(output);
@@ -127,7 +119,7 @@ export class PRListAction extends SingletonAction {
 			// Show success feedback
 			await ev.action.showOk();
 
-			streamDeck.logger.info(`Successfully generated PR list from PR #${prNumber}`);
+			streamDeck.logger.info("Successfully generated PR list from clipboard URL");
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			streamDeck.logger.error(`Failed to process clipboard: ${errorMessage}`);

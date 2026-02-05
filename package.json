@@ -1,13 +1,15 @@
 {
   "name": "streamdeck-pr-autoincrement",
   "version": "1.0.0",
-  "description": "Stream Deck plugin that reads a GitHub PR URL from clipboard and outputs 4 incrementing PR URLs",
+  "description": "Stream Deck plugin that turns a GitHub PR URL into four incrementing URLs.",
   "main": "com.futuroptimist.prlist.sdPlugin/bin/plugin.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "test": "node --test",
+    "test:ci": "npm test"
   },
   "keywords": [
     "streamdeck",

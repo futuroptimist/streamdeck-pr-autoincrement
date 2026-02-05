@@ -1,51 +1,62 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const version = process.argv[2];
-if (!version) {
-  console.error('Usage: node scripts/update-manifest-version.mjs <version>');
+const args = process.argv.slice(2);
+let manifestPath;
+let inputVersion;
+
+if (args.length === 1) {
+  [inputVersion] = args;
+  manifestPath = path.resolve('com.futuroptimist.prlist.sdPlugin', 'manifest.json');
+} else if (args.length === 2) {
+  [manifestPath, inputVersion] = args;
+  manifestPath = path.resolve(manifestPath);
+} else {
+  console.error(
+    'Usage: node scripts/update-manifest-version.mjs <version>\n' +
+      '   or: node scripts/update-manifest-version.mjs <manifestPath> <version>'
+  );
   process.exit(1);
 }
 
 const semverRegex = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-if (!semverRegex.test(version)) {
-  console.error('Invalid version format. Expected SemVer: X.Y.Z with no leading zeros (e.g., 1.2.3).');
+const fourPartRegex =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+let resolvedVersion;
+if (semverRegex.test(inputVersion)) {
+  resolvedVersion = `${inputVersion}.0`;
+} else if (fourPartRegex.test(inputVersion)) {
+  resolvedVersion = inputVersion;
+} else {
+  console.error(
+    'Invalid version format. Expected X.Y.Z or X.Y.Z.B with no leading zeros ' +
+      '(e.g., 1.2.3 or 1.2.3.0).'
+  );
   process.exit(1);
 }
 
-const manifestPath = path.resolve('com.futuroptimist.prlist.sdPlugin', 'manifest.json');
 if (!fs.existsSync(manifestPath)) {
   console.error(`manifest.json not found at expected path: ${manifestPath}`);
   process.exit(1);
 }
 
-let original;
+let manifest;
 try {
-  original = fs.readFileSync(manifestPath, 'utf8');
+  const original = fs.readFileSync(manifestPath, 'utf8');
+  manifest = JSON.parse(original);
 } catch (error) {
-  console.error(`Failed to read manifest.json at ${manifestPath}: ${error.message}`);
+  console.error(
+    `Failed to read or parse manifest.json at ${manifestPath}: ${error.message}`
+  );
   process.exit(1);
 }
+
+manifest.Version = resolvedVersion;
 
 try {
-  JSON.parse(original);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 } catch (error) {
-  console.error(`manifest.json at ${manifestPath} is not valid JSON: ${error.message}`);
+  console.error(`Failed to write manifest.json at ${manifestPath}: ${error.message}`);
   process.exit(1);
 }
-
-const updated = original.replace(
-  /"Version"\s*:\s*"[^"]*"/,
-  `"Version": "${version}"`
-);
-
-if (updated === original) {
-  if (!/"Version"\s*:/.test(original)) {
-    console.error('manifest.json does not contain a "Version" field to update.');
-  } else {
-    console.error('Failed to update manifest.json Version field: existing Version entry did not match the expected format.');
-  }
-  process.exit(1);
-}
-
-fs.writeFileSync(manifestPath, updated);
