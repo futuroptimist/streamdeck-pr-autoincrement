@@ -1,0 +1,129 @@
+name: Release Stream Deck Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer version to release (e.g., 1.0.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Resolve version
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: ${VERSION}. Expected X.Y.Z" >&2
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check tag availability
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+          TAG="v${{ steps.resolve.outputs.version }}"
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists on origin." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump versions
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.resolve.outputs.version }}"
+          npm version "${VERSION}" --no-git-tag-version
+          node scripts/update-manifest-version.mjs \
+            com.futuroptimist.prlist.sdPlugin/manifest.json "${VERSION}"
+
+      - name: Commit version bump
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json \
+            com.futuroptimist.prlist.sdPlugin/manifest.json
+          git commit -m "chore(release): v${{ steps.resolve.outputs.version }}"
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Stream Deck CLI
+        run: npm install -g @elgato/cli
+
+      - name: Validate plugin
+        run: streamdeck validate com.futuroptimist.prlist.sdPlugin
+
+      - name: Pack plugin
+        run: streamdeck pack com.futuroptimist.prlist.sdPlugin
+
+      - name: Locate release asset
+        id: asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET=$(find com.futuroptimist.prlist.sdPlugin/bin -maxdepth 2 \
+            -name "*.streamDeckPlugin" -print -quit)
+          if [[ -z "${ASSET}" ]]; then
+            echo "No .streamDeckPlugin asset found." >&2
+            exit 1
+          fi
+          echo "asset=${ASSET}" >> "${GITHUB_OUTPUT}"
+
+      - name: Tag and push
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag "v${{ steps.resolve.outputs.version }}"
+          git push origin HEAD
+          git push origin "v${{ steps.resolve.outputs.version }}"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.resolve.outputs.version }}"
+          name: "v${{ steps.resolve.outputs.version }}"
+          body: |
+            Stream Deck action that expands a GitHub PR URL into an incrementing list.
+          files: "${{ steps.asset.outputs.asset }}"
