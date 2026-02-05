@@ -48,6 +48,12 @@ streamdeck link com.futuroptimist.prlist.sdPlugin
 streamdeck pack com.futuroptimist.prlist.sdPlugin
 ```
 
+## Releasing via GitHub Actions
+
+1. Open **Actions** → **Release** → **Run workflow**.
+2. Enter a SemVer like `1.0.0` and run the workflow.
+3. Download the `.streamDeckPlugin` asset from the GitHub Release.
+
 ## Usage
 
 1. Copy a GitHub PR URL that ends with `/pull/<number>`.

@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer X.Y.Z"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Validate version input
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must match X.Y.Z where X/Y/Z are non-negative integers."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Check for existing tag
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "Tag v${VERSION} already exists locally."
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q "refs/tags/v${VERSION}$"; then
+            echo "Tag v${VERSION} already exists on origin."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Bump package version
+        run: |
+          set -euo pipefail
+          npm version "${VERSION}" --no-git-tag-version
+
+      - name: Update Stream Deck manifest version
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const version = process.env.VERSION;
+          const manifestPath = 'com.futuroptimist.prlist.sdPlugin/manifest.json';
+          const contents = fs.readFileSync(manifestPath, 'utf8');
+          const updated = contents.replace(
+            /("Version"\s*:\s*")[^"]*(")/,
+            `$1${version}$2`
+          );
+
+          if (contents === updated) {
+            throw new Error('Failed to update manifest Version field.');
+          }
+
+          fs.writeFileSync(manifestPath, updated);
+          NODE
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Install Stream Deck CLI
+        run: |
+          set -euo pipefail
+          npm install --global @elgato/cli
+
+      - name: Validate plugin
+        run: |
+          set -euo pipefail
+          streamdeck validate com.futuroptimist.prlist.sdPlugin
+
+      - name: Package plugin
+        run: |
+          set -euo pipefail
+          streamdeck pack com.futuroptimist.prlist.sdPlugin
+          ASSET_PATH=$(find com.futuroptimist.prlist.sdPlugin -maxdepth 1 \
+            -name '*.streamDeckPlugin' -print -quit)
+          if [ -z "$ASSET_PATH" ]; then
+            echo "Packaged .streamDeckPlugin not found."
+            exit 1
+          fi
+          echo "ASSET_PATH=$ASSET_PATH" >> "$GITHUB_ENV"
+
+      - name: Commit and tag release
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json \
+            com.futuroptimist.prlist.sdPlugin/manifest.json
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin HEAD
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ env.VERSION }}"
+          name: "v${{ env.VERSION }}"
+          body: |
+            Stream Deck plugin that reads a GitHub PR URL from the clipboard and outputs
+            4 incrementing PR URLs.
+          files: "${{ env.ASSET_PATH }}"
