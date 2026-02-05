@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer version (X.Y.Z)'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be strict SemVer X.Y.Z (e.g. 1.2.3)." >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch tags
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+
+      - name: Ensure tag does not exist
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
+            echo "Tag v${VERSION} already exists on origin." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Bump versions
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          npm version "${VERSION}" --no-git-tag-version
+          node scripts/update-manifest-version.mjs \
+            com.futuroptimist.prlist.sdPlugin/manifest.json \
+            "${VERSION}"
+
+      - name: Commit and tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json com.futuroptimist.prlist.sdPlugin/manifest.json
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin "HEAD:${GITHUB_REF#refs/heads/}"
+          git push origin "v${VERSION}"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Install Stream Deck CLI
+        run: |
+          set -euo pipefail
+          npm install -g @elgato/cli
+
+      - name: Validate and pack plugin
+        id: pack
+        run: |
+          set -euo pipefail
+          streamdeck validate com.futuroptimist.prlist.sdPlugin
+          streamdeck pack com.futuroptimist.prlist.sdPlugin
+          PACKAGE_PATH=$(find . -maxdepth 2 -name "*.streamDeckPlugin" -print -quit)
+          if [[ -z "${PACKAGE_PATH}" ]]; then
+            echo "Packaged .streamDeckPlugin not found." >&2
+            exit 1
+          fi
+          echo "package_path=${PACKAGE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: |
+            Stream Deck plugin that reads a GitHub PR URL from clipboard and outputs 4 incrementing PR URLs.
+          files: ${{ steps.pack.outputs.package_path }}
