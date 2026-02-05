@@ -1,0 +1,163 @@
+name: Release Stream Deck Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer version (X.Y.Z)'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+            if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Invalid version: $version. Expected X.Y.Z with no leading zeros." >&2
+              exit 1
+            fi
+            git fetch --tags origin
+            if git ls-remote --tags origin "refs/tags/v${version}" | grep -q .; then
+              echo "Tag v${version} already exists on origin." >&2
+              exit 1
+            fi
+            if curl --fail --silent --location \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${version}" \
+              >/dev/null; then
+              echo "Release v${version} already exists." >&2
+              exit 1
+            fi
+          else
+            ref="${GITHUB_REF_NAME}"
+            if ! [[ "$ref" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Invalid tag ${ref}. Expected vX.Y.Z with no leading zeros." >&2
+              exit 1
+            fi
+            version="${ref#v}"
+            if curl --fail --silent --location \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/${ref}" \
+              >/dev/null; then
+              echo "Release ${ref} already exists." >&2
+              exit 1
+            fi
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump versions
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+          node scripts/update-manifest-version.mjs "${{ steps.version.outputs.version }}"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Validate versions match tag
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          node -e "const fs=require('fs');const tag='${{ steps.version.outputs.version }}';const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const manifest=JSON.parse(fs.readFileSync('com.futuroptimist.prlist.sdPlugin/manifest.json','utf8'));if(pkg.version!==tag){throw new Error(\`package.json version \${pkg.version} does not match tag \${tag}\`);}if(manifest.Version!==tag){throw new Error(\`manifest.json Version \${manifest.Version} does not match tag \${tag}\`);}"
+
+      - name: Install Stream Deck CLI
+        run: |
+          set -euo pipefail
+          npm install --global @elgato/cli
+
+      - name: Validate plugin
+        run: |
+          set -euo pipefail
+          streamdeck validate com.futuroptimist.prlist.sdPlugin
+
+      - name: Package plugin
+        run: |
+          set -euo pipefail
+          streamdeck pack com.futuroptimist.prlist.sdPlugin
+
+      - name: Verify package artifact
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          plugin_files=(com.futuroptimist.prlist.sdPlugin/bin/*.streamDeckPlugin)
+          shopt -u nullglob
+          if [ "${#plugin_files[@]}" -eq 0 ]; then
+            echo "Error: No .streamDeckPlugin files were produced in com.futuroptimist.prlist.sdPlugin/bin/" >&2
+            ls -al com.futuroptimist.prlist.sdPlugin || true
+            ls -al com.futuroptimist.prlist.sdPlugin/bin || true
+            exit 1
+          fi
+          for pkg in "${plugin_files[@]}"; do
+            if [ ! -s "$pkg" ]; then
+              echo "Error: Packaged plugin file '$pkg' is empty." >&2
+              exit 1
+            fi
+          done
+
+      - name: Commit and tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          if [[ -z "$BRANCH" || "$BRANCH" == "$GITHUB_REF" ]]; then
+            echo "Unexpected GITHUB_REF=$GITHUB_REF (expected refs/heads/*)" >&2
+            exit 1
+          fi
+          echo "Resolved branch: ${BRANCH}"
+          echo "Release version: ${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json \
+            com.futuroptimist.prlist.sdPlugin/manifest.json
+          git commit -m "chore(release): v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "HEAD:${BRANCH}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ steps.version.outputs.tag }}"
+          name: "${{ steps.version.outputs.tag }}"
+          body: |
+            Generates a 4-line list of incrementing GitHub PR URLs from your clipboard.
+          files: com.futuroptimist.prlist.sdPlugin/bin/*.streamDeckPlugin
