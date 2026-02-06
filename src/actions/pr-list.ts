@@ -2,8 +2,8 @@ import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/
 import { spawn } from "child_process";
 
 /**
- * Regex to match a GitHub PR URL ending with /pull/<number> with optional trailing slash/whitespace.
- * Captures the PR number.
+ * Regex to match a GitHub PR URL ending with /pull/<number> with an optional trailing
+ * slash/whitespace. Captures the PR number.
  */
 const PR_URL_REGEX = /\/pull\/(\d+)\/?\s*$/;
 
@@ -109,22 +109,28 @@ async function writeClipboard(text: string): Promise<void> {
 @action({ UUID: "com.futuroptimist.prlist.fromclipboard" })
 export class PRListAction extends SingletonAction {
 	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+		let stage = "readClipboard";
 		try {
-			// Read clipboard content
 			const clipboardContent = await readClipboard();
+			stage = "buildPrListFromUrl";
 			const output = buildPrListFromUrl(clipboardContent, 4);
 
-			// Write to clipboard
+			stage = "writeClipboard";
 			await writeClipboard(output);
 
-			// Show success feedback
 			await ev.action.showOk();
 
 			streamDeck.logger.info("Successfully generated PR list from clipboard content");
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			streamDeck.logger.error(`Failed to process clipboard: ${errorMessage}`);
+			const logMessage = `Failed to process clipboard at ${stage} on ${process.platform}: ${
+				errorMessage
+			}`;
+			streamDeck.logger.error(logMessage);
+			await ev.action.setTitle("ERR");
 			await ev.action.showAlert();
+			await new Promise((resolve) => setTimeout(resolve, 1500));
+			await ev.action.setTitle("");
 		}
 	}
 }
