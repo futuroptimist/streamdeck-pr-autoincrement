@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "pretest": "npm run build",
-    "test": "node --test",
+    "test": "TS_NODE_COMPILER_OPTIONS='{ \"module\": \"ES2022\" }' node --test --loader ts-node/esm test/*.test.js test/*.test.ts",
     "test:ci": "npm test",
     "watch": "tsc --watch",
     "lint": "eslint src --ext .ts"
@@ -28,6 +28,7 @@
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
     "eslint": "^8.56.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
   "engines": {
