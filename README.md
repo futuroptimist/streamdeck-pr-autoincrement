@@ -74,6 +74,9 @@ Set `PR_AUTOINC_DEBUG_UI=1` for the Stream Deck process, then launch Stream Deck
 Example (macOS): `PR_AUTOINC_DEBUG_UI=1 open -a "Stream Deck"`. On Windows, you can
 set the variable in your terminal before launching Stream Deck (or set it
 system-wide temporarily).
+When debug UI is enabled, logs include a short clipboard preview (up to 120
+characters) to help diagnose parsing issues—avoid enabling it if your clipboard
+may contain sensitive content.
 
 **What to search for in logs:**
 

@@ -36,6 +36,18 @@ function truncateTitle(value: string, maxLength = MAX_ERROR_TITLE_LENGTH): strin
 	return value.slice(0, maxLength);
 }
 
+function formatErrorTitle(stage: string): string {
+	if (!DEBUG_UI_ENABLED) {
+		return "ERR";
+	}
+	const shortenedStage = stage
+		.replace("READ_CLIPBOARD_START", "READ")
+		.replace("PARSE_START", "PARSE")
+		.replace("WRITE_CLIPBOARD_START", "WRITE")
+		.replace("_START", "");
+	return truncateTitle(`ERR:${shortenedStage}`);
+}
+
 async function setDebugTitle(actionInstance: KeyDownEvent["action"], title: string): Promise<void> {
 	if (!DEBUG_UI_ENABLED) {
 		return;
@@ -215,11 +227,17 @@ export class PRListAction extends SingletonAction {
 			streamDeck.logger.info(`STAGE=${stage}`);
 			await setDebugTitle(ev.action, "READ");
 			const clipboardContent = await readClipboard();
-			streamDeck.logger.info(
-				`STAGE=READ_CLIPBOARD_DONE length=${clipboardContent.length} preview="${sanitizePreview(
-					clipboardContent
-				)}"`
-			);
+			if (DEBUG_UI_ENABLED) {
+				streamDeck.logger.info(
+					`STAGE=READ_CLIPBOARD_DONE length=${
+						clipboardContent.length
+					} preview="${sanitizePreview(clipboardContent)}"`
+				);
+			} else {
+				streamDeck.logger.info(
+					`STAGE=READ_CLIPBOARD_DONE length=${clipboardContent.length}`
+				);
+			}
 			stage = "PARSE_START";
 			streamDeck.logger.info(`STAGE=${stage}`);
 			await setDebugTitle(ev.action, "PARSE");
@@ -254,9 +272,8 @@ export class PRListAction extends SingletonAction {
 				}
 			}
 			await ev.action.showAlert();
-			const errorTitle = DEBUG_UI_ENABLED ? `ERR:${stage}` : "ERR";
 			try {
-				await ev.action.setTitle(truncateTitle(errorTitle));
+				await ev.action.setTitle(formatErrorTitle(stage));
 			} catch (titleError) {
 				streamDeck.logger.error(
 					`Failed to set error title: ${

@@ -61,7 +61,7 @@ process.on("unhandledRejection", (reason) => {
 try {
 	streamDeck.logger.info("connecting...");
 	streamDeck.connect();
-	streamDeck.logger.info("Stream Deck connection established.");
+	streamDeck.logger.info("Stream Deck connect() call completed successfully.");
 } catch (error) {
 	streamDeck.logger.error(
 		`Failed to connect to Stream Deck: ${

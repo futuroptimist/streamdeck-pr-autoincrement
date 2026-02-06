@@ -20,4 +20,5 @@ test("pr-list.ts includes stage logging labels", () => {
 	assert.match(prListSource, /READ_CLIPBOARD_START/);
 	assert.match(prListSource, /PARSE_START/);
 	assert.match(prListSource, /WRITE_CLIPBOARD_START/);
+	assert.match(prListSource, /SUCCESS/);
 });
