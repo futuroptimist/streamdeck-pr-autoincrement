@@ -1,7 +1,30 @@
 import streamDeck, { LogLevel } from "@elgato/streamdeck";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import packageInfo from "../package.json";
 import "./actions/pr-list.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const readPluginVersion = (): string | undefined => {
+	try {
+		const manifestPath = path.resolve(__dirname, "..", "manifest.json");
+		const manifestRaw = fs.readFileSync(manifestPath, "utf8");
+		const manifest = JSON.parse(manifestRaw) as { Version?: string };
+		if (typeof manifest.Version === "string" && manifest.Version.length > 0) {
+			return manifest.Version;
+		}
+	} catch (error) {
+		streamDeck.logger.warn(
+			`Unable to read plugin manifest version: ${
+				error instanceof Error ? error.message : String(error)
+			}`
+		);
+	}
+	return undefined;
+};
 
 const LOG_LEVELS: Record<string, LogLevel> = {
 	debug: LogLevel.DEBUG,
@@ -13,7 +36,8 @@ const configuredLogLevel = process.env.STREAMDECK_LOG_LEVEL?.toLowerCase();
 streamDeck.logger.setLevel(LOG_LEVELS[configuredLogLevel ?? ""] ?? LogLevel.INFO);
 
 streamDeck.logger.info("plugin.ts loaded");
-streamDeck.logger.info(`Plugin version: ${packageInfo.version}`);
+const pluginVersion = readPluginVersion() ?? "unknown";
+streamDeck.logger.info(`Plugin version: ${pluginVersion}`);
 streamDeck.logger.info(
 	`Environment: platform=${process.platform} node=${process.version} cwd=${process.cwd()}`
 );
