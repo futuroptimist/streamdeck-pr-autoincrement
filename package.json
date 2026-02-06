@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "pretest": "npm run build",
-    "test": "tsc --module ES2022 --moduleResolution node --target ES2022 --allowSyntheticDefaultImports --esModuleInterop --outDir test-dist test/*.test.ts && node --test test-dist/*.test.js test/*.test.js",
+    "pretest": "npm run build && tsc --module ES2022 --moduleResolution node --target ES2022 --allowSyntheticDefaultImports --esModuleInterop --outDir test-dist test/*.test.ts",
+    "test": "node --test",
     "test:ci": "npm test",
     "watch": "tsc --watch",
     "lint": "eslint src --ext .ts"

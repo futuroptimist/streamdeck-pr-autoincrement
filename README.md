@@ -59,6 +59,20 @@ streamdeck pack com.futuroptimist.prlist.sdPlugin
 2. Press the Stream Deck key assigned to this action.
 3. Paste anywhere to get the 4-line bullet list.
 
+## Debugging
+
+Stream Deck typically writes plugin logs to:
+
+- macOS: `~/Library/Logs/StreamDeck/StreamDeck.log`
+- Windows: `%APPDATA%\\Elgato\\StreamDeck\\logs\\StreamDeck.log`
+
+To enable the optional debug UI titles on the key, set the environment variable
+`PR_AUTOINC_DEBUG_UI=1` for the Stream Deck process (for example, launch Stream Deck
+from a terminal with the variable set, or temporarily set it system-wide).
+
+Search logs for `PRListAction`, `READ_CLIPBOARD_START`, `PARSE_START`, and
+`WRITE_CLIPBOARD_START` to follow the onKeyDown lifecycle.
+
 ## Quick verification commands
 
 ```bash
