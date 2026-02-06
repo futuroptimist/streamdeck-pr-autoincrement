@@ -1,13 +1,27 @@
 import streamDeck, { LogLevel } from "@elgato/streamdeck";
 
-// Import actions to register them
-import { PRListAction } from "./actions/pr-list.js";
+import "./actions/pr-list.js";
 
-// Set log level
 streamDeck.logger.setLevel(LogLevel.DEBUG);
 
-// Register the action
-streamDeck.actions.registerAction(new PRListAction());
+process.on("uncaughtException", (error) => {
+	streamDeck.logger.error(
+		`Uncaught exception: ${error instanceof Error ? error.message : String(error)}`
+	);
+});
 
-// Connect to Stream Deck
-streamDeck.connect();
+process.on("unhandledRejection", (reason) => {
+	streamDeck.logger.error(
+		`Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`
+	);
+});
+
+try {
+	streamDeck.connect();
+} catch (error) {
+	streamDeck.logger.error(
+		`Failed to connect to Stream Deck: ${
+			error instanceof Error ? error.message : String(error)
+		}`
+	);
+}
