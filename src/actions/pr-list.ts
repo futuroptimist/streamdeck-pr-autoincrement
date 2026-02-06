@@ -108,13 +108,18 @@ async function writeClipboard(text: string): Promise<void> {
  */
 @action({ UUID: "com.futuroptimist.prlist.fromclipboard" })
 export class PRListAction extends SingletonAction {
+	private clearTitleTimeout?: NodeJS.Timeout;
+
 	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+		let stage = "readClipboard";
 		try {
 			// Read clipboard content
 			const clipboardContent = await readClipboard();
+			stage = "parseUrl";
 			const output = buildPrListFromUrl(clipboardContent, 4);
 
 			// Write to clipboard
+			stage = "writeClipboard";
 			await writeClipboard(output);
 
 			// Show success feedback
@@ -123,8 +128,25 @@ export class PRListAction extends SingletonAction {
 			streamDeck.logger.info("Successfully generated PR list from clipboard content");
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			streamDeck.logger.error(`Failed to process clipboard: ${errorMessage}`);
+			streamDeck.logger.error(
+				`Failed to process clipboard at ${stage} on ${process.platform}: ${errorMessage}`
+			);
 			await ev.action.showAlert();
+			await ev.action.setTitle("ERR");
+			if (this.clearTitleTimeout) {
+				clearTimeout(this.clearTitleTimeout);
+			}
+			const currentAction = ev.action;
+			this.clearTitleTimeout = setTimeout(() => {
+				void currentAction.setTitle("").catch((titleError) => {
+					streamDeck.logger.error(
+						`Failed to clear error title on ${process.platform}: ${
+							titleError instanceof Error ? titleError.message : String(titleError)
+						}`
+					);
+				});
+				this.clearTitleTimeout = undefined;
+			}, 1500);
 		}
 	}
 }
