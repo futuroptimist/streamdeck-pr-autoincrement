@@ -1,12 +1,8 @@
 import streamDeck, { LogLevel } from "@elgato/streamdeck";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import "./actions/pr-list.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const readPluginVersion = (): string | undefined => {
 	try {
@@ -63,7 +59,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 try {
-	streamDeck.logger.info("Connecting to Stream Deck...");
+	streamDeck.logger.info("connecting...");
 	streamDeck.connect();
 	streamDeck.logger.info("Stream Deck connection established.");
 } catch (error) {
