@@ -10,6 +10,6 @@ test("plugin entrypoint relies on decorator registration", () => {
 	assert.doesNotMatch(pluginSource, /registerAction\s*\(/);
 	assert.doesNotMatch(pluginSource, /\.actions\.registerAction/);
 	assert.doesNotMatch(pluginSource, /new\s+PRListAction/);
-	assert.match(pluginSource, /import\s+["']\.\/actions\/pr-list/);
+	assert.match(pluginSource, /import\s+["'`]\.\/actions\/pr-list/);
 	assert.match(pluginSource, /streamDeck\.connect\s*\(/);
 });
