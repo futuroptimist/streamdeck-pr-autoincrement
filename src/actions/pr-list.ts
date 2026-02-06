@@ -1,4 +1,9 @@
-import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/streamdeck";
+import streamDeck, {
+	action,
+	SingletonAction,
+	type KeyDownEvent,
+	type WillAppearEvent,
+} from "@elgato/streamdeck";
 import { spawn } from "child_process";
 
 /**
@@ -6,8 +11,62 @@ import { spawn } from "child_process";
  * Captures the PR number.
  */
 const PR_URL_REGEX = /\/pull\/(\d+)\/?\s*$/;
+const DEBUG_UI_ENABLED = process.env.PR_AUTOINC_DEBUG_UI === "1";
+const PREVIEW_LIMIT = 120;
+const MAX_ERROR_TITLE_LENGTH = 12;
 
-export function buildPrListFromUrl(url: string, count = 4): string {
+type ParsedPrUrl = {
+	prNumber: number;
+	prefix: string;
+	trimmedUrl: string;
+};
+
+function sanitizePreview(value: string): string {
+	const normalized = value.replace(/\s+/g, " ").trim();
+	if (normalized.length > PREVIEW_LIMIT) {
+		return `${normalized.slice(0, PREVIEW_LIMIT)}…`;
+	}
+	return normalized;
+}
+
+function truncateTitle(value: string, maxLength = MAX_ERROR_TITLE_LENGTH): string {
+	if (value.length <= maxLength) {
+		return value;
+	}
+	return value.slice(0, maxLength);
+}
+
+function formatErrorTitle(stage: string): string {
+	if (!DEBUG_UI_ENABLED) {
+		return "ERR";
+	}
+	const shortenedStage = stage
+		.replace("READ_CLIPBOARD_START", "READ")
+		.replace("PARSE_START", "PARSE")
+		.replace("WRITE_CLIPBOARD_START", "WRITE")
+		.replace("_START", "");
+	return truncateTitle(`ERR:${shortenedStage}`);
+}
+
+async function setDebugTitle(actionInstance: KeyDownEvent["action"], title: string): Promise<void> {
+	if (!DEBUG_UI_ENABLED) {
+		return;
+	}
+	try {
+		await actionInstance.setTitle(title);
+	} catch (error) {
+		streamDeck.logger.error(
+			`Failed to set debug title "${title}": ${
+				error instanceof Error ? error.message : String(error)
+			}`
+		);
+		if (error instanceof Error && error.stack) {
+			streamDeck.logger.error(`Debug title error stack: ${error.stack}`);
+		}
+	}
+}
+
+function parsePrUrl(url: string): ParsedPrUrl {
 	const trimmedUrl = url.trim();
 	const match = trimmedUrl.match(PR_URL_REGEX);
 
@@ -21,12 +80,20 @@ export function buildPrListFromUrl(url: string, count = 4): string {
 	}
 
 	const prefix = trimmedUrl.replace(PR_URL_REGEX, "/pull/");
+	return { prNumber, prefix, trimmedUrl };
+}
+
+function buildPrListFromParsed(parsed: ParsedPrUrl, count = 4): string {
 	const urls: string[] = [];
 	for (let i = 0; i < count; i++) {
-		urls.push(`- ${prefix}${prNumber + i}`);
+		urls.push(`- ${parsed.prefix}${parsed.prNumber + i}`);
 	}
 
 	return urls.join("\n");
+}
+
+export function buildPrListFromUrl(url: string, count = 4): string {
+	return buildPrListFromParsed(parsePrUrl(url), count);
 }
 
 /**
@@ -36,17 +103,34 @@ export function buildPrListFromUrl(url: string, count = 4): string {
 async function readClipboard(): Promise<string> {
 	const isMac = process.platform === "darwin";
 	return new Promise((resolve, reject) => {
-		const proc = isMac
-			? spawn("pbpaste", [], { shell: false })
-			: spawn("powershell.exe", ["-NoProfile", "-Command", "Get-Clipboard -Raw"], { shell: false });
+		const command = isMac
+			? { file: "pbpaste", args: [] }
+			: { file: "powershell.exe", args: ["-NoProfile", "-Command", "Get-Clipboard -Raw"] };
+		streamDeck.logger.info(
+			`Clipboard read command: ${command.file} ${command.args.join(" ")}`
+		);
+		const proc = spawn(command.file, command.args, { shell: false });
 		let output = "";
+		let stderrOutput = "";
 
 		proc.stdout.on("data", (chunk: Buffer | string) => {
 			output += chunk.toString();
 		});
 
+		if (proc.stderr) {
+			proc.stderr.on("data", (chunk: Buffer | string) => {
+				stderrOutput += chunk.toString();
+			});
+		}
+
 		proc.on("error", reject);
 		proc.on("close", (code) => {
+			if (stderrOutput) {
+				streamDeck.logger.info(
+					`Clipboard read stderr: ${sanitizePreview(stderrOutput)}`
+				);
+			}
+			streamDeck.logger.info(`Clipboard read exit code: ${code ?? "unknown"}`);
 			if (code === 0) {
 				resolve(output);
 			} else {
@@ -66,8 +150,10 @@ async function writeClipboard(text: string): Promise<void> {
 
 	return new Promise((resolve, reject) => {
 		let proc;
+		let commandLabel = "";
 		if (isMac) {
 			proc = spawn("pbcopy", [], { shell: false });
+			commandLabel = "pbcopy";
 		} else {
 			// On Windows, use PowerShell with stdin input
 			proc = spawn(
@@ -75,10 +161,24 @@ async function writeClipboard(text: string): Promise<void> {
 				["-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
 				{ shell: false }
 			);
+			commandLabel = "powershell.exe -NoProfile -Command Set-Clipboard -Value ([Console]::In.ReadToEnd())";
 		}
+		streamDeck.logger.info(`Clipboard write command: ${commandLabel}`);
+		let stderrOutput = "";
 
 		proc.on("error", reject);
+		if (proc.stderr) {
+			proc.stderr.on("data", (chunk: Buffer | string) => {
+				stderrOutput += chunk.toString();
+			});
+		}
 		proc.on("close", (code) => {
+			if (stderrOutput) {
+				streamDeck.logger.info(
+					`Clipboard write stderr: ${sanitizePreview(stderrOutput)}`
+				);
+			}
+			streamDeck.logger.info(`Clipboard write exit code: ${code ?? "unknown"}`);
 			if (code === 0) {
 				resolve();
 			} else {
@@ -110,29 +210,80 @@ async function writeClipboard(text: string): Promise<void> {
 export class PRListAction extends SingletonAction {
 	private clearTitleTimeout?: NodeJS.Timeout;
 
+	override async onWillAppear(ev: WillAppearEvent): Promise<void> {
+		streamDeck.logger.info(
+			`PRListAction ready: actionUuid=${ev.action.manifestId} actionId=${ev.action.id}`
+		);
+	}
+
 	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
-		let stage = "readClipboard";
+		let stage = "READ_CLIPBOARD_START";
+		const now = new Date().toISOString();
+		streamDeck.logger.info(
+			`onKeyDown fired at ${now} actionUuid=${ev.action.manifestId} actionId=${ev.action.id}`
+		);
 		try {
 			// Read clipboard content
+			streamDeck.logger.info(`STAGE=${stage}`);
+			await setDebugTitle(ev.action, "READ");
 			const clipboardContent = await readClipboard();
-			stage = "parseUrl";
-			const output = buildPrListFromUrl(clipboardContent, 4);
+			if (DEBUG_UI_ENABLED) {
+				streamDeck.logger.info(
+					`STAGE=READ_CLIPBOARD_DONE length=${
+						clipboardContent.length
+					} preview="${sanitizePreview(clipboardContent)}"`
+				);
+			} else {
+				streamDeck.logger.info(
+					`STAGE=READ_CLIPBOARD_DONE length=${clipboardContent.length}`
+				);
+			}
+			stage = "PARSE_START";
+			streamDeck.logger.info(`STAGE=${stage}`);
+			await setDebugTitle(ev.action, "PARSE");
+			const parsed = parsePrUrl(clipboardContent);
+			streamDeck.logger.info(
+				`STAGE=PARSE_DONE prNumber=${parsed.prNumber} prefix="${parsed.prefix}"`
+			);
+			const output = buildPrListFromParsed(parsed, 4);
 
 			// Write to clipboard
-			stage = "writeClipboard";
+			stage = "WRITE_CLIPBOARD_START";
+			streamDeck.logger.info(`STAGE=${stage}`);
+			await setDebugTitle(ev.action, "WRITE");
 			await writeClipboard(output);
+			streamDeck.logger.info(`STAGE=WRITE_CLIPBOARD_DONE length=${output.length}`);
 
 			// Show success feedback
 			await ev.action.showOk();
+			await setDebugTitle(ev.action, "OK");
 
+			streamDeck.logger.info("STAGE=SUCCESS");
 			streamDeck.logger.info("Successfully generated PR list from clipboard content");
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			streamDeck.logger.error(
-				`Failed to process clipboard at ${stage} on ${process.platform}: ${errorMessage}`
+				`Failed to process clipboard at STAGE=${stage} on ${process.platform}: ${errorMessage}`
 			);
+			if (error instanceof Error) {
+				streamDeck.logger.error(`Error name: ${error.name}`);
+				if (error.stack) {
+					streamDeck.logger.error(`Error stack: ${error.stack}`);
+				}
+			}
 			await ev.action.showAlert();
-			await ev.action.setTitle("ERR");
+			try {
+				await ev.action.setTitle(formatErrorTitle(stage));
+			} catch (titleError) {
+				streamDeck.logger.error(
+					`Failed to set error title: ${
+						titleError instanceof Error ? titleError.message : String(titleError)
+					}`
+				);
+				if (titleError instanceof Error && titleError.stack) {
+					streamDeck.logger.error(`Error title stack: ${titleError.stack}`);
+				}
+			}
 			if (this.clearTitleTimeout) {
 				clearTimeout(this.clearTitleTimeout);
 			}
