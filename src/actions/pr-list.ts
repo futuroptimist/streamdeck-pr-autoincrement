@@ -109,12 +109,16 @@ async function writeClipboard(text: string): Promise<void> {
 @action({ UUID: "com.futuroptimist.prlist.fromclipboard" })
 export class PRListAction extends SingletonAction {
 	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+		let stage = "startup";
 		try {
 			// Read clipboard content
+			stage = "clipboard_read";
 			const clipboardContent = await readClipboard();
+			stage = "parse_url";
 			const output = buildPrListFromUrl(clipboardContent, 4);
 
 			// Write to clipboard
+			stage = "clipboard_write";
 			await writeClipboard(output);
 
 			// Show success feedback
@@ -123,7 +127,22 @@ export class PRListAction extends SingletonAction {
 			streamDeck.logger.info("Successfully generated PR list from clipboard content");
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			streamDeck.logger.error(`Failed to process clipboard: ${errorMessage}`);
+			const context = `stage=${stage}, platform=${process.platform}`;
+			streamDeck.logger.error(
+				`Failed to process clipboard (${context}): ${errorMessage}`
+			);
+			try {
+				await ev.action.setTitle("ERR");
+				setTimeout(() => {
+					void ev.action.setTitle("");
+				}, 1500);
+			} catch (titleError) {
+				streamDeck.logger.error(
+					`Failed to set error title: ${
+						titleError instanceof Error ? titleError.message : String(titleError)
+					}`
+				);
+			}
 			await ev.action.showAlert();
 		}
 	}
