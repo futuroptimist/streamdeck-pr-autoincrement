@@ -1,4 +1,9 @@
-import streamDeck, { action, SingletonAction, type KeyDownEvent } from "@elgato/streamdeck";
+import streamDeck, {
+	action,
+	SingletonAction,
+	type KeyDownEvent,
+	type WillAppearEvent
+} from "@elgato/streamdeck";
 import { spawn } from "child_process";
 
 /**
@@ -6,8 +11,46 @@ import { spawn } from "child_process";
  * Captures the PR number.
  */
 const PR_URL_REGEX = /\/pull\/(\d+)\/?\s*$/;
+const DEBUG_UI_ENABLED = process.env.PR_AUTOINC_DEBUG_UI === "1";
+const CLIPBOARD_PREVIEW_LENGTH = 120;
 
-export function buildPrListFromUrl(url: string, count = 4): string {
+function sanitizePreview(text: string, maxLength = CLIPBOARD_PREVIEW_LENGTH): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	if (normalized.length <= maxLength) {
+		return normalized;
+	}
+	return `${normalized.slice(0, maxLength)}…`;
+}
+
+function formatErrorForLog(error: unknown): string {
+	if (error instanceof Error) {
+		return `${error.name}: ${error.message}\n${error.stack ?? ""}`.trim();
+	}
+	return String(error);
+}
+
+function logStage(stage: string, message?: string): void {
+	const suffix = message ? ` ${message}` : "";
+	streamDeck.logger.info(`[PRListAction] STAGE=${stage}${suffix}`);
+}
+
+async function setDebugTitle(
+	actionInstance: { setTitle: (title: string) => Promise<void> },
+	title: string
+): Promise<void> {
+	if (!DEBUG_UI_ENABLED) {
+		return;
+	}
+	try {
+		await actionInstance.setTitle(title);
+	} catch (error) {
+		streamDeck.logger.error(
+			`[PRListAction] Failed to set debug title "${title}": ${formatErrorForLog(error)}`
+		);
+	}
+}
+
+function parsePrUrl(url: string): { prefix: string; prNumber: number } {
 	const trimmedUrl = url.trim();
 	const match = trimmedUrl.match(PR_URL_REGEX);
 
@@ -21,6 +64,11 @@ export function buildPrListFromUrl(url: string, count = 4): string {
 	}
 
 	const prefix = trimmedUrl.replace(PR_URL_REGEX, "/pull/");
+	return { prefix, prNumber };
+}
+
+export function buildPrListFromUrl(url: string, count = 4): string {
+	const { prefix, prNumber } = parsePrUrl(url);
 	const urls: string[] = [];
 	for (let i = 0; i < count; i++) {
 		urls.push(`- ${prefix}${prNumber + i}`);
@@ -36,20 +84,31 @@ export function buildPrListFromUrl(url: string, count = 4): string {
 async function readClipboard(): Promise<string> {
 	const isMac = process.platform === "darwin";
 	return new Promise((resolve, reject) => {
+		const command = isMac ? "pbpaste" : "powershell.exe Get-Clipboard -Raw";
+		streamDeck.logger.info(`[PRListAction] Clipboard read command: ${command}`);
 		const proc = isMac
 			? spawn("pbpaste", [], { shell: false })
 			: spawn("powershell.exe", ["-NoProfile", "-Command", "Get-Clipboard -Raw"], { shell: false });
 		let output = "";
+		let stderr = "";
 
 		proc.stdout.on("data", (chunk: Buffer | string) => {
 			output += chunk.toString();
 		});
 
+		proc.stderr.on("data", (chunk: Buffer | string) => {
+			stderr += chunk.toString();
+		});
+
 		proc.on("error", reject);
 		proc.on("close", (code) => {
+			if (stderr) {
+				streamDeck.logger.warn(`[PRListAction] Clipboard read stderr: ${stderr.trim()}`);
+			}
 			if (code === 0) {
 				resolve(output);
 			} else {
+				streamDeck.logger.error(`[PRListAction] Clipboard read exit code: ${code ?? "null"}`);
 				reject(new Error(`Clipboard read failed with exit code ${code}`));
 			}
 		});
@@ -67,21 +126,34 @@ async function writeClipboard(text: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		let proc;
 		if (isMac) {
+			streamDeck.logger.info("[PRListAction] Clipboard write command: pbcopy");
 			proc = spawn("pbcopy", [], { shell: false });
 		} else {
 			// On Windows, use PowerShell with stdin input
+			streamDeck.logger.info(
+				"[PRListAction] Clipboard write command: powershell.exe Set-Clipboard -Value"
+			);
 			proc = spawn(
 				"powershell.exe",
 				["-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
 				{ shell: false }
 			);
 		}
+		let stderr = "";
+
+		proc.stderr.on("data", (chunk: Buffer | string) => {
+			stderr += chunk.toString();
+		});
 
 		proc.on("error", reject);
 		proc.on("close", (code) => {
+			if (stderr) {
+				streamDeck.logger.warn(`[PRListAction] Clipboard write stderr: ${stderr.trim()}`);
+			}
 			if (code === 0) {
 				resolve();
 			} else {
+				streamDeck.logger.error(`[PRListAction] Clipboard write exit code: ${code ?? "null"}`);
 				reject(new Error(`Clipboard write failed with exit code ${code}`));
 			}
 		});
@@ -110,28 +182,55 @@ async function writeClipboard(text: string): Promise<void> {
 export class PRListAction extends SingletonAction {
 	private clearTitleTimeout?: NodeJS.Timeout;
 
+	override async onWillAppear(ev: WillAppearEvent): Promise<void> {
+		streamDeck.logger.info(
+			`[PRListAction] Action ready: uuid=${ev.action.manifestId} id=${ev.action.id}`
+		);
+	}
+
 	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
-		let stage = "readClipboard";
+		const timestamp = new Date().toISOString();
+		streamDeck.logger.info(
+			`[PRListAction] onKeyDown fired ts=${timestamp} uuid=${ev.action.manifestId} id=${ev.action.id}`
+		);
+		let stage = "READ_CLIPBOARD";
 		try {
-			// Read clipboard content
+			logStage("READ_CLIPBOARD_START");
+			await setDebugTitle(ev.action, "READ");
 			const clipboardContent = await readClipboard();
-			stage = "parseUrl";
+			logStage(
+				"READ_CLIPBOARD_DONE",
+				`length=${clipboardContent.length} preview="${sanitizePreview(clipboardContent)}"`
+			);
+
+			stage = "PARSE";
+			logStage("PARSE_START");
+			await setDebugTitle(ev.action, "PARSE");
+			const { prefix, prNumber } = parsePrUrl(clipboardContent);
+			logStage("PARSE_DONE", `prNumber=${prNumber} prefix="${prefix}"`);
 			const output = buildPrListFromUrl(clipboardContent, 4);
 
 			// Write to clipboard
-			stage = "writeClipboard";
+			stage = "WRITE_CLIPBOARD";
+			logStage("WRITE_CLIPBOARD_START");
+			await setDebugTitle(ev.action, "WRITE");
 			await writeClipboard(output);
+			logStage("WRITE_CLIPBOARD_DONE");
 
 			// Show success feedback
 			await ev.action.showOk();
+			logStage("SUCCESS");
+			await setDebugTitle(ev.action, "OK");
 
-			streamDeck.logger.info("Successfully generated PR list from clipboard content");
+			streamDeck.logger.info("[PRListAction] Successfully generated PR list");
 		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
+			const errorMessage = formatErrorForLog(error);
 			streamDeck.logger.error(
-				`Failed to process clipboard at ${stage} on ${process.platform}: ${errorMessage}`
+				`[PRListAction] Failed to process clipboard at ${stage} on ${process.platform}: ${errorMessage}`
 			);
 			await ev.action.showAlert();
+			const errorTitle = `ERR:${stage}`.slice(0, 12);
+			await setDebugTitle(ev.action, errorTitle);
 			await ev.action.setTitle("ERR");
 			if (this.clearTitleTimeout) {
 				clearTimeout(this.clearTitleTimeout);
@@ -140,9 +239,9 @@ export class PRListAction extends SingletonAction {
 			this.clearTitleTimeout = setTimeout(() => {
 				void currentAction.setTitle("").catch((titleError) => {
 					streamDeck.logger.error(
-						`Failed to clear error title on ${process.platform}: ${
-							titleError instanceof Error ? titleError.message : String(titleError)
-						}`
+						`[PRListAction] Failed to clear error title on ${process.platform}: ${formatErrorForLog(
+							titleError
+						)}`
 					);
 				});
 				this.clearTitleTimeout = undefined;
